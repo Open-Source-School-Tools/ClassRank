@@ -1,13 +1,9 @@
 import json
 import sys
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, 
-    QLabel, QMenuBar, QMessageBox, QDialog, QFormLayout, 
-    QComboBox, QSpinBox, QDialogButtonBox, QGridLayout, QInputDialog, 
-    QLineEdit, QFileDialog
-)
-from PyQt6.QtGui import QFont, QAction
-from PyQt6.QtCore import Qt
+import os
+from PyQt6.QtCore import Qt, QSize, QTimer, QEvent, QCoreApplication, QDateTime
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QFont, QAction, QBrush, QColor, QPalette, QPen, QFontDatabase, QCursor, QStandardItem, QStandardItemModel, QImage, QPalette
+from PyQt6.QtWidgets import QVBoxLayout, QLabel, QMainWindow, QApplication, QDialog, QMenu, QMenuBar, QFileDialog, QLineEdit, QSpinBox, QFormLayout, QPushButton, QMessageBox, QDialogButtonBox, QWidget, QGridLayout, QInputDialog
 from qt_material import apply_stylesheet
 
 class HonorApp(QMainWindow):
@@ -62,7 +58,13 @@ class HonorApp(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
-
+        
+        # Adding theme toggle
+        view_menu = menu_bar.addMenu("View")
+        theme_toggle = QAction("Toggle Dark Mode", self, checkable=True)
+        theme_toggle.triggered.connect(self.toggle_dark_mode)
+        view_menu.addAction(theme_toggle)
+        
     def show_initial_setup_dialog(self):
         # Create a message box with custom buttons
         message_box = QMessageBox(self)
@@ -148,7 +150,8 @@ class HonorApp(QMainWindow):
             if name in self.students:
                 QMessageBox.warning(self, "Warning", "Student already exists.")
             else:
-                self.students[name] = 0  # Initialize points to 0
+                # Initialize with 0 points and no profile picture
+                self.students[name] = {'points': 0, 'profile_picture': None}
                 self.update_grid()
 
     def remove_student_dialog(self):
@@ -180,32 +183,84 @@ class HonorApp(QMainWindow):
                 student_button = self.create_student_button(name, points)
                 self.grid_layout.addWidget(student_button, row, col)
                 col += 1
-                if col >= 3:  # Adjust number of columns as needed
+                if col >= 4:  # Adjust number of columns as needed
                     col = 0
                     row += 1
         else:
             # Show the no students message if there are no students
             self.no_students_label.show()
 
-    def create_student_button(self, name, points):
-        button = QPushButton(f"{name}\nPoints: {points}")
-        button.setFixedSize(150, 100)
+    def create_student_button(self, name, data):
+        button = QPushButton()
+        button.setFixedSize(180, 80)
         button.setFont(QFont("Arial", 10))
         button.clicked.connect(lambda: self.open_student_settings(name))
 
-        # Set button color based on points
-        if points >= 0:
-            button.setStyleSheet("background-color: lightgreen; border: 1px solid black; color: black")
-        else:
-            button.setStyleSheet("background-color: lightcoral; border: 1px solid black; color: red")
+        points = data['points']
+        profile_picture = data.get('profile_picture', '')
         
-        return button
+        # Use the default profile picture if none is set or file doesn't exist
+        if not profile_picture or not os.path.exists(profile_picture):
+            profile_picture = 'Res/default.png'  # Ensure this path is correct and the image exists
+        
+        # Set profile picture if available and make it circular
+        if profile_picture and os.path.exists(profile_picture):
+            pixmap = QPixmap(profile_picture).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            icon = QIcon(pixmap)
+            button.setIcon(icon)
+            button.setIconSize(pixmap.size())
 
+        button.setText(f"{name}\nPoints: {points}")
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {'lightgreen' if points >= 0 else 'lightcoral'};
+                color: {'black' if points >= 0 else 'white'};
+                border: 1px solid black;
+                text-align: center;
+                padding: 5px;
+                font-size: 10pt;
+            }}
+            QPushButton::icon {{
+                margin-bottom: 10px;  /* Space between the icon and the text */
+            }}
+            """
+        )
+
+        # Add circular border to the icon using a QPixmap mask
+        if profile_picture and os.path.exists(profile_picture):
+            circular_pixmap = QPixmap(48, 48)
+            circular_pixmap.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(circular_pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+            # Draw circular clip
+            path = QPainterPath()
+            path.addEllipse(0, 0, 48, 48)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pixmap)
+            painter.end()
+
+            # Set the circular pixmap with a QIcon
+            circular_icon = QIcon(circular_pixmap)
+            button.setIcon(circular_icon)
+            button.setIconSize(QSize(48, 48))
+
+        return button
+    
     def open_student_settings(self, name):
         # Open the student settings dialog
         dialog = StudentSettingsDialog(name, self.students)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.update_grid()
+
+    def toggle_dark_mode(self, checked):
+        if checked:
+            apply_stylesheet(app, theme='dark_blue.xml')
+        else:
+            apply_stylesheet(app, theme='light_blue.xml')
 
     def closeEvent(self, event):
         # Prompt user to save data before closing
@@ -223,46 +278,69 @@ class HonorApp(QMainWindow):
             event.ignore()
 
 class StudentSettingsDialog(QDialog):
-    def __init__(self, student_name, students):
+    def __init__(self, name, students):
         super().__init__()
-        self.setWindowTitle(f"Settings for {student_name}")
+        self.setWindowTitle("Student Settings")
         self.students = students
-        self.original_name = student_name
+        self.original_name = name
 
-        # Layout
+        # Dialog layout
         layout = QFormLayout(self)
-
+        
         # Name input
-        self.name_input = QLineEdit(student_name)
-        layout.addRow("Student Name:", self.name_input)
+        self.name_edit = QLineEdit(name)
+        layout.addRow("Name:", self.name_edit)
 
         # Points input
-        self.points_input = QSpinBox()
-        self.points_input.setRange(-100, 100)
-        self.points_input.setValue(students[student_name])
-        layout.addRow("Points:", self.points_input)
+        self.points_spin = QSpinBox()
+        self.points_spin.setRange(-1000, 1000)
+        self.points_spin.setValue(self.students[name]['points'])
+        layout.addRow("Points:", self.points_spin)
+
+        # Profile picture button
+        self.profile_picture_button = QPushButton("Select Profile Picture")
+        self.profile_picture_button.clicked.connect(self.select_profile_picture)
+        layout.addRow("Profile Picture:", self.profile_picture_button)
 
         # Dialog buttons
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.button_box.accepted.connect(self.accept_changes)
-        self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
-    def accept_changes(self):
-        new_name = self.name_input.text().strip()
-        new_points = self.points_input.value()
+    def select_profile_picture(self):
+        options = QFileDialog.Option.ReadOnly
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Select Profile Picture", "", "Image Files (*.png *.jpg *.bmp);;All Files (*)", options=options
+        )
+        if file_name:
+            self.students[self.original_name]['profile_picture'] = file_name
 
-        # Update student information
-        if new_name and new_name != self.original_name:
-            if new_name in self.students:
-                QMessageBox.warning(self, "Warning", "Another student with this name already exists.")
-                return
-            del self.students[self.original_name]
-            self.students[new_name] = new_points
-        else:
-            self.students[self.original_name] = new_points
-        
-        self.accept()
+    def accept(self):
+        new_name = self.name_edit.text().strip()
+        new_points = self.points_spin.value()
+
+        # Check if new name is valid and update student information
+        if new_name:
+            # Check if renaming is required
+            if new_name != self.original_name:
+                # Ensure no existing student has the new name
+                if new_name in self.students:
+                    QMessageBox.warning(self, "Warning", "Another student with this name already exists.")
+                    return
+
+                # Move data from original name to new name
+                self.students[new_name] = self.students.pop(self.original_name)
+                self.students[new_name]['points'] = new_points
+            else:
+                # If the name hasn't changed, just update the points
+                self.students[self.original_name]['points'] = new_points
+
+            # Ensure profile picture is kept if set
+            if 'profile_picture' not in self.students[new_name]:
+                self.students[new_name]['profile_picture'] = ''
+
+        super().accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
