@@ -1,4 +1,4 @@
-name: VegasCon Build
+name: Honor Build
 
 on:
   push:
